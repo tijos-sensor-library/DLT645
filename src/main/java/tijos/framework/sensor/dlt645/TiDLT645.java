@@ -3,15 +3,17 @@ package tijos.framework.sensor.dlt645;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
- 
+
 import tijos.framework.devicecenter.TiUART;
 import tijos.framework.util.Delay;
+import tijos.framework.util.Formatter;
 import tijos.framework.util.LittleBitConverter;
+import tijos.framework.util.crc.CheckSum8;
 
 /**
  * Hello world!
  */
-public class TiDLT645 {
+public class TiDLT645 extends Thread  {
 
 	/***** data tags table, DI0 DI1 DI2 DI3 *******/
 	public static final int DLT645_TAG_FORWARD_ACTIVE_POWER = 0x00010000; // 表读数-总（正向有功）
@@ -88,19 +90,98 @@ public class TiDLT645 {
 	 * meter address
 	 */
 	byte[] MeterAddress = new byte[DLT645_ADDRESS_LEN];
-	boolean hasMeterAddress = false;
+	
+    // Keep the UART read thread running
+    private boolean keeprunning = true;
+
+    IDeviceEventListener eventLisener = null;
+
 
 	/**
 	 * Initialize with Uart
 	 * 
 	 * @param uart
 	 */
-	public TiDLT645(TiUART uart) {
+	public TiDLT645(TiUART uart)  {
 		this.uart = uart;
 		this.input = new BufferedInputStream(new TiUartInputStream(uart), 256);
-		
+
 		initMeterAddress();
 	}
+	
+    @Override
+    public void run() {
+
+        while (true) {
+            try {
+                while (keeprunning) {
+                    Delay.msDelay(10);
+
+                    while (input.available() < 10) {
+                        Delay.msDelay(10);
+                        continue;
+                    }
+
+                    int val = input.read();
+                    // head
+                    if (val == DLT645_START_BYTE) {
+                    	CheckSum8 checksum = new CheckSum8();
+                    	checksum.update(val);
+                    	
+                    	byte [] address = new byte[DLT645_ADDRESS_LEN];                    	
+                        input.read(address);
+                        
+                        checksum.update(address);
+
+                        val = input.read();
+                        if(val != DLT645_START_BYTE) {
+                        	continue;
+                        }
+
+                        checksum.update(val);
+                        
+                        int funCode = input.read();
+                        int dataLen = input.read();
+
+                        checksum.update(funCode, dataLen);
+                        
+                        int leftLen = dataLen + 2;
+                        while (input.available() < leftLen) {
+                            Delay.msDelay(10);
+                            continue;
+                        }
+
+                        byte[] buffer = new byte[leftLen];
+                        input.read(buffer);
+                        
+                        checksum.update(buffer, 0, buffer.length - 2);
+                        
+                        if(checksum.getValue() != (byte)(buffer[leftLen - 2] & 0xFF)) {
+                        	throw new IOException("Invalid CheckSum");
+                        }
+                        
+                    	if (dataLen > 0) {
+                			for (int i = 0; i < dataLen; ++i) {
+                				buffer[i] = (byte) (buffer[i] - 0x33);
+                			}
+                		}
+                        
+                        byte [] tag = new byte[DLT645_DATA_TAG_LEN];
+                        System.arraycopy(buffer, 0, tag, 0, DLT645_DATA_TAG_LEN);
+                        
+                        byte [] data = new byte[dataLen];
+                        System.arraycopy(buffer, DLT645_DATA_TAG_LEN, data, 0, dataLen - DLT645_DATA_TAG_LEN);
+
+                        if(eventLisener != null)
+                        	eventLisener.onDataArrived(funCode, tag, data);
+                    }
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
 
 	/**
 	 * Initialize meter address
@@ -111,26 +192,25 @@ public class TiDLT645 {
 		}
 	}
 
-	/**
-	 * had got address before from the device
-	 * @return
-	 */
-	boolean hasMeterAddress() {
-		return hasMeterAddress;
-	}
+    /**
+     * Event listener for data arrived from remote node
+     *
+     * @param listener
+     */
+    public void setEventListener(IDeviceEventListener listener) {
+        this.eventLisener = listener;
+    }
+
 
 	/**
 	 * Get meter address
+	 * 
 	 * @return
 	 * @throws IOException
 	 */
-	public byte [] getMeterAddress() throws IOException {
-		
-		double reading = queryMeterReading(0);
-		
-		return this.MeterAddress;
+	public byte[] readMeterAddress() throws IOException {
+		return queryMeterReading(DLT645_PKT_TYPE_READ_ADDRESS, 0);
 	}
-	
 
 	/**
 	 * query meter reading by data tag
@@ -139,17 +219,68 @@ public class TiDLT645 {
 	 * @return
 	 * @throws IOException
 	 */
-	public double queryMeterReading(int dataTag) throws IOException {
+	public byte [] readMeterData(int dataTag)  throws IOException {
+		return queryMeterReading(DLT645_PKT_TYPE_READ_DATA, dataTag);
+	}
+	
+	/**
+	 * Convert BCD to reading
+	 * 
+	 * @param input
+	 * @param decimal
+	 * @return
+	 */
+	public double BCD2Double(byte[] input, int decimal) {
+		return BCD2Double(input, 0, input.length, decimal);
+	}
+
+
+	public double BCD2Double(byte[] input, int start, int len, int decimal) {
+		double reading = 0;
+		double coef = 1;
+		
+		if(start + len > input.length)
+			return Double.NaN;
+
+		/* result is in BCD format XXXXXX.XX, little endian */
+		for (int i = 0; i < len; ++i) {
+			reading += (input[start + i] & 0x0f) * coef;
+			reading += (input[start + i] >> 4) * 10 * coef;
+			coef *= 100;
+		}
+
+		for (int i = 0; i < decimal; i++) {
+			reading /= 10.0;
+		}
+
+		return reading;
+	}
+
+	/**
+	 * Send meter data tag reading request, the result should be returned from 
+	 * @param dataTag
+	 * @throws IOException
+	 */
+	public void sendMeterReadingRequest( int dataTag) throws IOException 
+	{
+		byte[] pkt = createSendPkt(DLT645_PKT_TYPE_READ_DATA, dataTag); // format of message
+
+		sendPkt(pkt);
+	}
+	
+	
+	
+	/**
+	 * query meter reading by data tag
+	 * 
+	 * @param dataTag
+	 * @return
+	 * @throws IOException
+	 */
+	private byte[] queryMeterReading(int funCode, int dataTag) throws IOException {
 		int expectRecvLen = DLT645_HEAD_TAIL_LEN + DLT645_DATA_TAG_LEN + DLT645_POWER_READING_LEN + DLT645_EXTRA_LEN;
 
-		int func_code;
-
-		if (hasMeterAddress)
-			func_code = DLT645_PKT_TYPE_READ_DATA;
-		else
-			func_code = DLT645_PKT_TYPE_READ_ADDRESS;
-
-		byte[] pkt = createSendPkt(func_code, dataTag); // format of message
+		byte[] pkt = createSendPkt(funCode, dataTag); // format of message
 
 		sendPkt(pkt);
 
@@ -160,13 +291,13 @@ public class TiDLT645 {
 			throw new IOException("DLT645 Receive meter reading reply failed!");
 		}
 
-		double reading = decodePkt(func_code, recvPkt, dataTag);
+		byte[] meterData = decodePkt(funCode, recvPkt, dataTag);
 
 		this.clearBuff();
 
-		return reading;
+		return meterData;
 	}
-	
+
 	/**
 	 * Create send packet by type
 	 * 
@@ -220,28 +351,27 @@ public class TiDLT645 {
 			}
 		}
 
-		pkt[pktLen - 2] = getChecksum(pkt, 4, pktLen - 6); // get the checksum excluding the leading bytes and end byte
+		pkt[pktLen - 2] = (byte)getChecksum(pkt, 4, pktLen - 6); // get the checksum excluding the leading bytes and end byte
 		pkt[pktLen - 1] = 0x16;
 
 		return pkt;
 	}
 
 	/**
-	 * Decode data from received packet
+	 * Decode the tag data from received packet
 	 * 
-	 * @param type
+	 * @param funCode function code
 	 * @param Pkt
 	 * @param match_data
 	 * @return
 	 * @throws IOException
 	 */
-	private double decodePkt(int type, byte[] Pkt, int match_data) throws IOException {
-		double reading = 0;
+	private byte[] decodePkt(int funCode, byte[] Pkt, int match_data) throws IOException {
 		int check_len;
 
 		/* delete all leading bytes */
 		int startPos = 0;
-		while (Pkt[startPos] != DLT645_START_BYTE && startPos < Pkt.length) {
+		while (Pkt[startPos] != DLT645_START_BYTE && startPos < Pkt.length - 1) {
 			startPos++;
 		}
 
@@ -253,7 +383,7 @@ public class TiDLT645 {
 		int data_len = Pkt[startPos + 9];
 
 		check_len = DLT645_FIXED_LEN + data_len;
-		int expCS = Pkt[startPos + check_len];
+		int expCS = Pkt[startPos + check_len] & 0xFF;
 		int CS = getChecksum(Pkt, startPos, check_len);// excluding cs and end byte
 		if (expCS != CS) {
 			throw new IOException("DLT645 Decode: Checksum mismatch! CS " + CS + " exp CS " + expCS);
@@ -261,7 +391,7 @@ public class TiDLT645 {
 
 		/* check if the receive pkt and the send pkt types match */
 		int controlCode = Pkt[startPos + 8];
-		if ((type & DLT645_FUNC_CODE_MASK) != (controlCode & DLT645_FUNC_CODE_MASK)) {
+		if ((funCode & DLT645_FUNC_CODE_MASK) != (controlCode & DLT645_FUNC_CODE_MASK)) {
 			throw new IOException("DLT645 Decode: Send and receive package types mismatch!");
 		}
 
@@ -272,7 +402,7 @@ public class TiDLT645 {
 
 		byte[] Type_Match = LittleBitConverter.GetBytes(match_data);
 
-		switch (type) {
+		switch (funCode) {
 		case DLT645_PKT_TYPE_READ_ADDRESS:
 			if (data_len < DLT645_ADDRESS_LEN) {
 				throw new IOException("DLT645 Decode: receive read address data len mismatch!");
@@ -283,9 +413,8 @@ public class TiDLT645 {
 			}
 
 			System.arraycopy(Pkt, startPos + 10, MeterAddress, 0, DLT645_ADDRESS_LEN);
-			hasMeterAddress = true;
 
-			break;
+			return this.MeterAddress;
 
 		case DLT645_PKT_TYPE_READ_DATA:
 			if (memcmp(MeterAddress, 0, Pkt, startPos + 1, DLT645_ADDRESS_LEN) != 0) {
@@ -308,40 +437,17 @@ public class TiDLT645 {
 				throw new IOException("DLT645 Decode: receive reply reading data length mismatch!");
 			}
 
-			// 4 bytes reading follows 4 bytes data tag in the data area
-			reading = tanslateReadingResult(Pkt, startPos + DLT645_FIXED_LEN + DLT645_DATA_TAG_LEN, data_len);
-			break;
+			// 4 bytes reading follows N bytes data tag in the data area
+			byte[] meterData = new byte[data_len - DLT645_DATA_TAG_LEN];
+			System.arraycopy(Pkt, startPos + DLT645_FIXED_LEN + DLT645_DATA_TAG_LEN, meterData, 0, meterData.length);
+
+			return meterData;
 
 		default:
 			throw new IOException("DLT645 Decode: control code type unknown!");
 		}
-
-		return reading;
 	}
 
-
-	/**
-	 * Get the reading from the received packet.
-	 * 
-	 * @param result
-	 * @param startPos
-	 * @param len
-	 * @return
-	 */
-	private int tanslateReadingResult(byte[] result, int startPos, int len) {
-		int reading = 0;
-		float coef = 1;
-		int datalen = len - DLT645_DATA_TAG_LEN;
-
-		/* result is in BCD format XXXXXX.XX, little endian */
-		for (int i = 0; i < datalen; ++i) {
-			reading += (result[i + startPos] & 0x0f) * coef;
-			reading += (result[i + startPos] >> 4) * 10 * coef;
-			coef *= 100;
-		}
-
-		return reading;
-	}
 
 	/**
 	 * Generate checksum from data buffer
@@ -351,15 +457,22 @@ public class TiDLT645 {
 	 * @param len   length
 	 * @return checksum value
 	 */
-	private byte getChecksum(byte[] data, int start, int len) {
-		byte sum = 0;
+	private int getChecksum(byte[] data, int start, int len) {
+		/*byte sum = 0;
 
 		for (int i = start; i < start + len; i++) {
 			sum += data[i];
 		}
 
 		return sum;
+		*/
+		
+		CheckSum8 checksum = new CheckSum8();
+		checksum.update(data, start, len);
+
+		return checksum.getValue();
 	}
+	
 
 	/**
 	 * Memory compare
@@ -395,6 +508,7 @@ public class TiDLT645 {
 	 * @throws IOException
 	 */
 	private void sendPkt(byte[] pkt) throws IOException {
+		System.out.println(Formatter.toHexString(pkt));
 		this.uart.write(pkt, 0, pkt.length);
 	}
 
@@ -432,7 +546,4 @@ public class TiDLT645 {
 			;
 	}
 
-	public static void main(String[] args) {
-		System.out.println("Hello World!");
-	}
 }

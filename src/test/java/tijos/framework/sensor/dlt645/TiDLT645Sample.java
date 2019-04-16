@@ -24,12 +24,12 @@ public class TiDLT645Sample {
 				TiDLT645.DLT645_TAG_BACKWARD_ACTIVE_POWER_2, TiDLT645.DLT645_TAG_BACKWARD_ACTIVE_POWER_3,
 				TiDLT645.DLT645_TAG_BACKWARD_ACTIVE_POWER_4 };
 
-		TiUART uart = TiUART.open(3);
+		TiUART uart = TiUART.open(5);
 		uart.setWorkParameters(8, 1, TiUART.PARITY_EVEN, 2400);
 
 		TiDLT645 dlt645 = new TiDLT645(uart);
 		
-		byte [] addr = dlt645.getMeterAddress();
+		dlt645.readMeterAddress();
 		
 		for(int tag:All_Meter_Data)
 		{
@@ -39,9 +39,9 @@ public class TiDLT645Sample {
 	}
 
 	static double MeterReading_Get(TiDLT645 dlt645, int meterdata) throws IOException {
-		double reading;
-		reading = dlt645.queryMeterReading(meterdata); // read meter data
-
+		byte [] meterData = dlt645.readMeterData(meterdata); // read meter data
+		
+		double reading  = dlt645.BCD2Double(meterData, 2);
 		return reading;
 	}
 }
