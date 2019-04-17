@@ -9,13 +9,20 @@ import tijos.framework.util.Delay;
 import tijos.framework.util.Formatter;
 import tijos.framework.util.LittleBitConverter;
 
+
 public class TiJoyMeter implements IDeviceEventListener {
 
 	private TiDLT645 dlt645;
 
+	/**
+	 * 抄读当前数据
+	 */
 	private static final int JOYMETER_TAG_CURRENT_DATA = 0x001D0000; //
 
-	private static final int JOYMETER_TAG_WRITE_DATA = 0X04000110;
+	/**
+	 * 远程合闸
+	 */
+	private static final int JOYMETER_TAG_SWITCH = 0X0400050A;
 
 	/**
 	 * 计量时间（格林尼治）（hex）
@@ -121,7 +128,7 @@ public class TiJoyMeter implements IDeviceEventListener {
 
 		byte[] data = new byte[1];
 		data[0] = 0;
-		dlt645.writeMeterDataRequest(password, operator, JOYMETER_TAG_WRITE_DATA, data);
+		dlt645.writeMeterDataRequest(password, operator, JOYMETER_TAG_SWITCH, data);
 	}
 
 	/**
@@ -135,7 +142,7 @@ public class TiJoyMeter implements IDeviceEventListener {
 
 		byte[] data = new byte[1];
 		data[0] = 1;
-		dlt645.writeMeterDataRequest(password, operator, JOYMETER_TAG_WRITE_DATA, data);
+		dlt645.writeMeterDataRequest(password, operator, JOYMETER_TAG_SWITCH, data);
 	}
 
 	/**
@@ -159,9 +166,12 @@ public class TiJoyMeter implements IDeviceEventListener {
 			} else if ((dataTag >> 24) == 0x08) {
 				dlt645.writeAlarmDataResponse(dataTag);
 				parseAlarmData(dataTag, data);
-			}
-			else if(dataTag == JOYMETER_TAG_WRITE_DATA) {
-				
+			} else if (dataTag == 0) {
+				if (funCode == 0x94) {
+					System.out.println(" ok " + data[0]);
+				} else if (funCode == 0xD4) {
+					System.out.println("error " + data[0]);
+				}
 			}
 
 		} catch (Exception ex) {

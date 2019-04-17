@@ -12,7 +12,7 @@ public class TiJoyMeterSample implements IJoyMeterEventListener {
 
 	TiJoyMeter jmeter = null;
 
-	byte[] operator = new byte[] { 0x00, 0x00, 0x00, 0x01 };
+	byte[] operator = new byte[] { 0x00, 0x00, 0x00, 0x01 };  
 	byte[] password = new byte[] { 0x00, 0x00, 0x00, 0x02 };
 
 	public TiJoyMeterSample(TiUART uart) throws IOException {
@@ -23,7 +23,8 @@ public class TiJoyMeterSample implements IJoyMeterEventListener {
 		byte[] address = jmeter.getMeterAddress();
 		System.out.println("address " + Formatter.toHexString(address));
 
-		jmeter.start();
+		jmeter.setEventListner(this);
+		jmeter.start();  
 
 	}
 

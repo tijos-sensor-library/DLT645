@@ -64,6 +64,9 @@ public class TiDLT645 extends Thread {
 	private static final int DLT645_PKT_TYPE_WRITE_ADDRESS = 0x15;
 	private static final int DLT645_PKT_TYPE_CHANGE_COMM_SPEED = 0x17;
 
+	private static final int DLT645_PKT_TYPE_WRITE_DATA_RSP = 0x94;
+	private static final int DLT645_PKT_TYPE_WRITE_DATA_ERR = 0xD4;
+
 	/***** package length *******/
 	private static final int DLT645_HEAD_TAIL_LEN = 16; // 4 leading bytes, 2 start bytes, 6 address, 1 func code, 1
 														// data len, 1 cs, 1 end byte
@@ -73,8 +76,8 @@ public class TiDLT645 extends Thread {
 	private static final int DLT645_MAX_DATA_LEN = 12; // max data 4+8
 	private static final int DLT645_MIN_DATA_LEN = 6; // min data 4+2
 	private static final int DLT645_POWER_READING_LEN = 4; // power data len
-	private static final int DLT645_PASSWORD_LEN = 4; // password  len
-	private static final int DLT645_OPERATOR_LEN = 4; // operator  len
+	private static final int DLT645_PASSWORD_LEN = 4; // password len
+	private static final int DLT645_OPERATOR_LEN = 4; // operator len
 	private static final int DLT645_FIXED_LEN = 10; // 2leading bytes，6 meter address，1func code，1 data len
 	private static final int DLT645_gPHASE_VC_LEN = 2; // E V data len
 	private static final int DLT645_gPHASE_P_LEN = 3; // three-phase power len
@@ -160,8 +163,8 @@ public class TiDLT645 extends Thread {
 
 						checksum.update(buffer, 0, buffer.length - 2);
 
-						if (checksum.getValue() != (byte) (buffer[leftLen - 2] & 0xFF)) {
-							throw new IOException("Invalid CheckSum");
+						if (checksum.getValue() != (buffer[leftLen - 2] & 0xFF)) {
+							// throw new IOException("Invalid CheckSum");
 						}
 
 						if (dataLen > 0) {
@@ -170,16 +173,24 @@ public class TiDLT645 extends Thread {
 							}
 						}
 
-						byte[] tag = new byte[DLT645_DATA_TAG_LEN];
-						System.arraycopy(buffer, 0, tag, 0, DLT645_DATA_TAG_LEN);
+						if (funCode == DLT645_PKT_TYPE_WRITE_DATA_RSP || funCode == DLT645_PKT_TYPE_WRITE_DATA_ERR) {
+							byte[] data = new byte[dataLen];
+							System.arraycopy(buffer, 0, data, 0, dataLen);
+							if (eventLisener != null) {
+								eventLisener.onDataArrived(funCode, 0, data);
+							}
 
-						byte[] data = new byte[dataLen];
-						System.arraycopy(buffer, DLT645_DATA_TAG_LEN, data, 0, dataLen - DLT645_DATA_TAG_LEN);
+						} else {
+							byte[] tag = new byte[DLT645_DATA_TAG_LEN];
+							System.arraycopy(buffer, 0, tag, 0, DLT645_DATA_TAG_LEN);
 
-						if (eventLisener != null)
-						{
-							int dataTag = LittleBitConverter.ToInt32(tag, 0);
-							eventLisener.onDataArrived(funCode, dataTag, data);
+							byte[] data = new byte[dataLen];
+							System.arraycopy(buffer, DLT645_DATA_TAG_LEN, data, 0, dataLen - DLT645_DATA_TAG_LEN);
+
+							if (eventLisener != null) {
+								int dataTag = LittleBitConverter.ToInt32(tag, 0);
+								eventLisener.onDataArrived(funCode, dataTag, data);
+							}
 						}
 					}
 				}
@@ -257,7 +268,6 @@ public class TiDLT645 extends Thread {
 		this.clearBuff();
 	}
 
-	
 	/**
 	 * Send meter data tag reading request, the result should be returned from
 	 * 
@@ -286,19 +296,19 @@ public class TiDLT645 extends Thread {
 		byte[] pkt = createWriteRequest(DLT645_PKT_TYPE_WRITE_DATA, password, operator, dataTag, data);
 		sendPkt(pkt);
 	}
-	
+
 	/**
-	 * Alarm response 
+	 * Alarm response
+	 * 
 	 * @param dataTag
 	 * @throws IOException
 	 */
-	public void writeAlarmDataResponse(int dataTag) throws IOException
-	{
+	public void writeAlarmDataResponse(int dataTag) throws IOException {
 		byte[] pkt = createSendPkt(DLT645_PKT_TYPE_READ_DATA_LEFT, dataTag);
-		
+
 		sendPkt(pkt);
 	}
-	
+
 	/**
 	 * Convert BCD to reading
 	 * 
@@ -330,7 +340,6 @@ public class TiDLT645 extends Thread {
 
 		return reading;
 	}
-
 
 	/**
 	 * query meter reading by data tag
@@ -421,10 +430,10 @@ public class TiDLT645 extends Thread {
 	}
 
 	private byte[] createWriteRequest(int funCode, byte[] password, byte[] operator, int dataTag, byte[] data) {
-		
-		int expectRecvLen = DLT645_HEAD_TAIL_LEN + DLT645_DATA_TAG_LEN + DLT645_PASSWORD_LEN + DLT645_OPERATOR_LEN + DLT645_EXTRA_LEN;
 
-		
+		int expectRecvLen = DLT645_HEAD_TAIL_LEN + DLT645_DATA_TAG_LEN + DLT645_PASSWORD_LEN + DLT645_OPERATOR_LEN
+				+ DLT645_EXTRA_LEN;
+
 		int dataLen = 04 + 04 + 04 + data.length;
 		int pktLen = expectRecvLen;
 		int pos = 0;
@@ -457,7 +466,13 @@ public class TiDLT645 extends Thread {
 		pos += 4;
 
 		System.arraycopy(data, 0, pkt, pos, data.length);
-		pos += 4;
+		pos += data.length;
+
+		if (dataLen > 0) {
+			for (int i = 0; i < dataLen; ++i) {
+				pkt[14 + i] = (byte) (pkt[14 + i] + 0x33);
+			}
+		}
 
 		pkt[pos++] = (byte) getChecksum(pkt, 4, pktLen - 6); // get the checksum excluding the leading bytes and end
 																// byte
@@ -618,7 +633,7 @@ public class TiDLT645 extends Thread {
 	 * @throws IOException
 	 */
 	private void sendPkt(byte[] pkt) throws IOException {
-		System.out.println(Formatter.toHexString(pkt));
+		System.out.println("send " + Formatter.toHexString(pkt));
 		this.uart.write(pkt, 0, pkt.length);
 	}
 
@@ -646,7 +661,7 @@ public class TiDLT645 extends Thread {
 	}
 
 	/**
-	 * clear uart buffer
+	 * clear UART buffer
 	 * 
 	 * @throws IOException
 	 */
@@ -656,40 +671,18 @@ public class TiDLT645 extends Thread {
 			;
 	}
 
-	/**
-	 * bytes字符串转换为Byte值
-	 * 
-	 * @param src String Byte字符串，每个Byte之间没有分隔符(字符范围:0-9 A-F)
-	 * @return byte[]
-	 */
-	public static byte[] hexStr2Bytes(String src) {
-		/* 对输入值进行规范化整理 */
-		src = src.trim().replace(" ", "").toUpperCase();
-		// 处理值初始化
-		int m = 0, n = 0;
-		int iLen = src.length() / 2; // 计算长度
-		byte[] ret = new byte[iLen]; // 分配存储空间
-
-		for (int i = 0; i < iLen; i++) {
-			m = i * 2 + 1;
-			n = m + 1;
-			ret[i] = (byte) (Integer.decode("0x" + src.substring(i * 2, m) + src.substring(m, n)) & 0xFF);
-		}
-		return ret;
-	}
 
 	// FEFEFEFE6866666666666668911F33335033650F9F6B33333333333333338733333343553533933933337538331516
 	public static void main(String[] args) throws IOException {
 
 		TiDLT645 dlt = new TiDLT645(null);
-		byte [] password = new byte[] {0x00,0x00,0x00,0x00};
-		byte [] operator = new byte[] {(byte)0xC1,(byte)0XC2,(byte)0XC3, (byte)0XC4};
+		byte[] password = new byte[] { 0x00, 0x00, 0x00, 0x00 };
+		byte[] operator = new byte[] { (byte) 0xC1, (byte) 0XC2, (byte) 0XC3, (byte) 0XC4 };
 		int dataTag = 0x0400010A;
-	
-		byte [] data = new byte[] {01};
-		
+
+		byte[] data = new byte[] { 01 };
+
 		byte[] pkt = dlt.createWriteRequest(DLT645_PKT_TYPE_WRITE_DATA, password, operator, dataTag, data);
-		
-		
+
 	}
 }
