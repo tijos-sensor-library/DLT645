@@ -13,7 +13,7 @@ import tijos.framework.util.crc.CheckSum8;
 /**
  * Hello world!
  */
-public class TiDLT645 extends Thread  {
+public class TiDLT645 extends Thread {
 
 	/***** data tags table, DI0 DI1 DI2 DI3 *******/
 	public static final int DLT645_TAG_FORWARD_ACTIVE_POWER = 0x00010000; // 表读数-总（正向有功）
@@ -73,6 +73,8 @@ public class TiDLT645 extends Thread  {
 	private static final int DLT645_MAX_DATA_LEN = 12; // max data 4+8
 	private static final int DLT645_MIN_DATA_LEN = 6; // min data 4+2
 	private static final int DLT645_POWER_READING_LEN = 4; // power data len
+	private static final int DLT645_PASSWORD_LEN = 4; // password  len
+	private static final int DLT645_OPERATOR_LEN = 4; // operator  len
 	private static final int DLT645_FIXED_LEN = 10; // 2leading bytes，6 meter address，1func code，1 data len
 	private static final int DLT645_gPHASE_VC_LEN = 2; // E V data len
 	private static final int DLT645_gPHASE_P_LEN = 3; // three-phase power len
@@ -90,98 +92,102 @@ public class TiDLT645 extends Thread  {
 	 * meter address
 	 */
 	byte[] MeterAddress = new byte[DLT645_ADDRESS_LEN];
-	
-    // Keep the UART read thread running
-    private boolean keeprunning = true;
 
-    IDeviceEventListener eventLisener = null;
+	// Keep the UART read thread running
+	private boolean keeprunning = true;
 
+	IDeviceEventListener eventLisener = null;
 
 	/**
 	 * Initialize with Uart
 	 * 
 	 * @param uart
 	 */
-	public TiDLT645(TiUART uart)  {
+	public TiDLT645(TiUART uart) {
 		this.uart = uart;
 		this.input = new BufferedInputStream(new TiUartInputStream(uart), 256);
 
 		initMeterAddress();
 	}
-	
-    @Override
-    public void run() {
 
-        while (true) {
-            try {
-                while (keeprunning) {
-                    Delay.msDelay(10);
+	@Override
+	public void run() {
 
-                    while (input.available() < 10) {
-                        Delay.msDelay(10);
-                        continue;
-                    }
+		while (true) {
+			try {
+				while (keeprunning) {
+					Delay.msDelay(10);
 
-                    int val = input.read();
-                    // head
-                    if (val == DLT645_START_BYTE) {
-                    	CheckSum8 checksum = new CheckSum8();
-                    	checksum.update(val);
-                    	
-                    	byte [] address = new byte[DLT645_ADDRESS_LEN];                    	
-                        input.read(address);
-                        
-                        checksum.update(address);
+					while (input.available() < 10) {
+						Delay.msDelay(10);
+						continue;
+					}
 
-                        val = input.read();
-                        if(val != DLT645_START_BYTE) {
-                        	continue;
-                        }
+					int val = input.read();
 
-                        checksum.update(val);
-                        
-                        int funCode = input.read();
-                        int dataLen = input.read();
+					// head
+					if (val == DLT645_START_BYTE) {
 
-                        checksum.update(funCode, dataLen);
-                        
-                        int leftLen = dataLen + 2;
-                        while (input.available() < leftLen) {
-                            Delay.msDelay(10);
-                            continue;
-                        }
+						CheckSum8 checksum = new CheckSum8();
+						checksum.update(val);
 
-                        byte[] buffer = new byte[leftLen];
-                        input.read(buffer);
-                        
-                        checksum.update(buffer, 0, buffer.length - 2);
-                        
-                        if(checksum.getValue() != (byte)(buffer[leftLen - 2] & 0xFF)) {
-                        	throw new IOException("Invalid CheckSum");
-                        }
-                        
-                    	if (dataLen > 0) {
-                			for (int i = 0; i < dataLen; ++i) {
-                				buffer[i] = (byte) (buffer[i] - 0x33);
-                			}
-                		}
-                        
-                        byte [] tag = new byte[DLT645_DATA_TAG_LEN];
-                        System.arraycopy(buffer, 0, tag, 0, DLT645_DATA_TAG_LEN);
-                        
-                        byte [] data = new byte[dataLen];
-                        System.arraycopy(buffer, DLT645_DATA_TAG_LEN, data, 0, dataLen - DLT645_DATA_TAG_LEN);
+						byte[] address = new byte[DLT645_ADDRESS_LEN];
+						input.read(address);
 
-                        if(eventLisener != null)
-                        	eventLisener.onDataArrived(funCode, tag, data);
-                    }
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-    }
+						checksum.update(address);
 
+						val = input.read();
+						if (val != DLT645_START_BYTE) {
+							checksum.update(val);
+							continue;
+						}
+
+						checksum.update(val);
+
+						int funCode = input.read();
+						int dataLen = input.read();
+
+						checksum.update(funCode, dataLen);
+
+						int leftLen = dataLen + 2;
+						while (input.available() < leftLen) {
+							Delay.msDelay(10);
+							continue;
+						}
+
+						byte[] buffer = new byte[leftLen];
+						input.read(buffer);
+
+						checksum.update(buffer, 0, buffer.length - 2);
+
+						if (checksum.getValue() != (byte) (buffer[leftLen - 2] & 0xFF)) {
+							throw new IOException("Invalid CheckSum");
+						}
+
+						if (dataLen > 0) {
+							for (int i = 0; i < dataLen; ++i) {
+								buffer[i] = (byte) (buffer[i] - 0x33);
+							}
+						}
+
+						byte[] tag = new byte[DLT645_DATA_TAG_LEN];
+						System.arraycopy(buffer, 0, tag, 0, DLT645_DATA_TAG_LEN);
+
+						byte[] data = new byte[dataLen];
+						System.arraycopy(buffer, DLT645_DATA_TAG_LEN, data, 0, dataLen - DLT645_DATA_TAG_LEN);
+
+						if (eventLisener != null)
+						{
+							int dataTag = LittleBitConverter.ToInt32(tag, 0);
+							eventLisener.onDataArrived(funCode, dataTag, data);
+						}
+					}
+				}
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		}
+	}
 
 	/**
 	 * Initialize meter address
@@ -192,15 +198,14 @@ public class TiDLT645 extends Thread  {
 		}
 	}
 
-    /**
-     * Event listener for data arrived from remote node
-     *
-     * @param listener
-     */
-    public void setEventListener(IDeviceEventListener listener) {
-        this.eventLisener = listener;
-    }
-
+	/**
+	 * Event listener for data arrived from remote node
+	 *
+	 * @param listener
+	 */
+	public void setEventListener(IDeviceEventListener listener) {
+		this.eventLisener = listener;
+	}
 
 	/**
 	 * Get meter address
@@ -219,8 +224,79 @@ public class TiDLT645 extends Thread  {
 	 * @return
 	 * @throws IOException
 	 */
-	public byte [] readMeterData(int dataTag)  throws IOException {
+	public byte[] readMeterData(int dataTag) throws IOException {
 		return queryMeterReading(DLT645_PKT_TYPE_READ_DATA, dataTag);
+	}
+
+	/**
+	 * write the specified tag data to meter with password and operator
+	 * 
+	 * @param password
+	 * @param operator
+	 * @param dataTag
+	 * @param data
+	 * @throws IOException
+	 */
+	public void writeMeterData(byte[] password, byte[] operator, int dataTag, byte[] data) throws IOException {
+		if (password.length != 4 || operator.length != 4)
+			throw new IOException("invalid password or oeprator length");
+
+		byte[] pkt = createWriteRequest(DLT645_PKT_TYPE_WRITE_DATA, password, operator, dataTag, data);
+		sendPkt(pkt);
+
+		int expectRecvLen = DLT645_HEAD_TAIL_LEN;
+		byte[] recvPkt = getReply(expectRecvLen, 500);
+
+		if (recvPkt.length == 0) {
+			this.clearBuff();
+			throw new IOException("DLT645 Receive meter reading reply failed!");
+		}
+
+		decodePkt(DLT645_PKT_TYPE_WRITE_DATA, recvPkt, dataTag);
+
+		this.clearBuff();
+	}
+
+	
+	/**
+	 * Send meter data tag reading request, the result should be returned from
+	 * 
+	 * @param dataTag
+	 * @throws IOException
+	 */
+	public void sendMeterReadingRequest(int dataTag) throws IOException {
+		byte[] pkt = createSendPkt(DLT645_PKT_TYPE_READ_DATA, dataTag); // format of message
+
+		sendPkt(pkt);
+	}
+
+	/**
+	 * Send write command data request
+	 * 
+	 * @param password 4 bytes password
+	 * @param operator 4 bytes operator
+	 * @param dataTag
+	 * @param data
+	 * @throws IOException
+	 */
+	public void writeMeterDataRequest(byte[] password, byte[] operator, int dataTag, byte[] data) throws IOException {
+		if (password.length != 4 || operator.length != 4)
+			throw new IOException("invalid password or oeprator length");
+
+		byte[] pkt = createWriteRequest(DLT645_PKT_TYPE_WRITE_DATA, password, operator, dataTag, data);
+		sendPkt(pkt);
+	}
+	
+	/**
+	 * Alarm response 
+	 * @param dataTag
+	 * @throws IOException
+	 */
+	public void writeAlarmDataResponse(int dataTag) throws IOException
+	{
+		byte[] pkt = createSendPkt(DLT645_PKT_TYPE_READ_DATA_LEFT, dataTag);
+		
+		sendPkt(pkt);
 	}
 	
 	/**
@@ -234,12 +310,11 @@ public class TiDLT645 extends Thread  {
 		return BCD2Double(input, 0, input.length, decimal);
 	}
 
-
 	public double BCD2Double(byte[] input, int start, int len, int decimal) {
 		double reading = 0;
 		double coef = 1;
-		
-		if(start + len > input.length)
+
+		if (start + len > input.length)
 			return Double.NaN;
 
 		/* result is in BCD format XXXXXX.XX, little endian */
@@ -256,20 +331,7 @@ public class TiDLT645 extends Thread  {
 		return reading;
 	}
 
-	/**
-	 * Send meter data tag reading request, the result should be returned from 
-	 * @param dataTag
-	 * @throws IOException
-	 */
-	public void sendMeterReadingRequest( int dataTag) throws IOException 
-	{
-		byte[] pkt = createSendPkt(DLT645_PKT_TYPE_READ_DATA, dataTag); // format of message
 
-		sendPkt(pkt);
-	}
-	
-	
-	
 	/**
 	 * query meter reading by data tag
 	 * 
@@ -301,18 +363,18 @@ public class TiDLT645 extends Thread  {
 	/**
 	 * Create send packet by type
 	 * 
-	 * @param type
+	 * @param funCode
 	 * @param dataTag
 	 * @return
 	 */
-	private byte[] createSendPkt(int type, int dataTag) throws IOException {
+	private byte[] createSendPkt(int funCode, int dataTag) throws IOException {
 		int datalen = 0;
 		int pktLen;
 		byte[] data = new byte[DLT645_MAX_DATA_LEN];
 
-		switch (type) {
+		switch (funCode) {
 		case DLT645_PKT_TYPE_READ_DATA:
-
+		case DLT645_PKT_TYPE_READ_DATA_LEFT:
 			datalen = DLT645_DATA_TAG_LEN;
 
 			byte[] tag = LittleBitConverter.GetBytes(dataTag);
@@ -342,7 +404,7 @@ public class TiDLT645 extends Thread  {
 		System.arraycopy(MeterAddress, 0, pkt, 5, MeterAddress.length);
 
 		pkt[11] = DLT645_START_BYTE;
-		pkt[12] = (byte) (DLT645_MASTER_QUERY | type); // function code
+		pkt[12] = (byte) (DLT645_MASTER_QUERY | funCode); // function code
 		pkt[13] = (byte) datalen;
 
 		if (datalen > 0) {
@@ -351,8 +413,55 @@ public class TiDLT645 extends Thread  {
 			}
 		}
 
-		pkt[pktLen - 2] = (byte)getChecksum(pkt, 4, pktLen - 6); // get the checksum excluding the leading bytes and end byte
+		pkt[pktLen - 2] = (byte) getChecksum(pkt, 4, pktLen - 6); // get the checksum excluding the leading bytes and
+																	// end byte
 		pkt[pktLen - 1] = 0x16;
+
+		return pkt;
+	}
+
+	private byte[] createWriteRequest(int funCode, byte[] password, byte[] operator, int dataTag, byte[] data) {
+		
+		int expectRecvLen = DLT645_HEAD_TAIL_LEN + DLT645_DATA_TAG_LEN + DLT645_PASSWORD_LEN + DLT645_OPERATOR_LEN + DLT645_EXTRA_LEN;
+
+		
+		int dataLen = 04 + 04 + 04 + data.length;
+		int pktLen = expectRecvLen;
+		int pos = 0;
+
+		byte[] pkt = new byte[pktLen];
+
+		/* add 4 leading bytes */
+		pkt[pos++] = (byte) DLT645_LEADING_BYTE;
+		pkt[pos++] = (byte) DLT645_LEADING_BYTE;
+		pkt[pos++] = (byte) DLT645_LEADING_BYTE;
+		pkt[pos++] = (byte) DLT645_LEADING_BYTE;
+
+		pkt[pos++] = DLT645_START_BYTE; // start byte
+
+		System.arraycopy(MeterAddress, 0, pkt, pos, MeterAddress.length);
+		pos += DLT645_ADDRESS_LEN;
+
+		pkt[pos++] = DLT645_START_BYTE;
+		pkt[pos++] = (byte) funCode;
+		pkt[pos++] = (byte) dataLen;
+
+		byte[] tag = LittleBitConverter.GetBytes(dataTag);
+		System.arraycopy(tag, 0, pkt, pos, tag.length);
+		pos += DLT645_DATA_TAG_LEN;
+
+		System.arraycopy(password, 0, pkt, pos, password.length);
+		pos += 4;
+
+		System.arraycopy(operator, 0, pkt, pos, operator.length);
+		pos += 4;
+
+		System.arraycopy(data, 0, pkt, pos, data.length);
+		pos += 4;
+
+		pkt[pos++] = (byte) getChecksum(pkt, 4, pktLen - 6); // get the checksum excluding the leading bytes and end
+																// byte
+		pkt[pos++] = 0x16;
 
 		return pkt;
 	}
@@ -360,7 +469,7 @@ public class TiDLT645 extends Thread  {
 	/**
 	 * Decode the tag data from received packet
 	 * 
-	 * @param funCode function code
+	 * @param funCode    function code
 	 * @param Pkt
 	 * @param match_data
 	 * @return
@@ -443,11 +552,22 @@ public class TiDLT645 extends Thread  {
 
 			return meterData;
 
+		case DLT645_PKT_TYPE_WRITE_DATA:
+
+			if (memcmp(MeterAddress, 0, Pkt, startPos + 1, DLT645_ADDRESS_LEN) != 0) {
+				throw new IOException("DLT645 Decode: receive reply reading meter address mismatch!");
+			}
+
+			if (controlCode != 0x94) {
+				throw new IOException("DLT645 Decode: receive reply reading control code is not 0x94!");
+			}
+
+			return null;
+
 		default:
 			throw new IOException("DLT645 Decode: control code type unknown!");
 		}
 	}
-
 
 	/**
 	 * Generate checksum from data buffer
@@ -457,22 +577,12 @@ public class TiDLT645 extends Thread  {
 	 * @param len   length
 	 * @return checksum value
 	 */
-	private int getChecksum(byte[] data, int start, int len) {
-		/*byte sum = 0;
-
-		for (int i = start; i < start + len; i++) {
-			sum += data[i];
-		}
-
-		return sum;
-		*/
-		
+	private static int getChecksum(byte[] data, int start, int len) {
 		CheckSum8 checksum = new CheckSum8();
 		checksum.update(data, start, len);
 
 		return checksum.getValue();
 	}
-	
 
 	/**
 	 * Memory compare
@@ -546,4 +656,40 @@ public class TiDLT645 extends Thread  {
 			;
 	}
 
+	/**
+	 * bytes字符串转换为Byte值
+	 * 
+	 * @param src String Byte字符串，每个Byte之间没有分隔符(字符范围:0-9 A-F)
+	 * @return byte[]
+	 */
+	public static byte[] hexStr2Bytes(String src) {
+		/* 对输入值进行规范化整理 */
+		src = src.trim().replace(" ", "").toUpperCase();
+		// 处理值初始化
+		int m = 0, n = 0;
+		int iLen = src.length() / 2; // 计算长度
+		byte[] ret = new byte[iLen]; // 分配存储空间
+
+		for (int i = 0; i < iLen; i++) {
+			m = i * 2 + 1;
+			n = m + 1;
+			ret[i] = (byte) (Integer.decode("0x" + src.substring(i * 2, m) + src.substring(m, n)) & 0xFF);
+		}
+		return ret;
+	}
+
+	// FEFEFEFE6866666666666668911F33335033650F9F6B33333333333333338733333343553533933933337538331516
+	public static void main(String[] args) throws IOException {
+
+		TiDLT645 dlt = new TiDLT645(null);
+		byte [] password = new byte[] {0x00,0x00,0x00,0x00};
+		byte [] operator = new byte[] {(byte)0xC1,(byte)0XC2,(byte)0XC3, (byte)0XC4};
+		int dataTag = 0x0400010A;
+	
+		byte [] data = new byte[] {01};
+		
+		byte[] pkt = dlt.createWriteRequest(DLT645_PKT_TYPE_WRITE_DATA, password, operator, dataTag, data);
+		
+		
+	}
 }

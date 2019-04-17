@@ -15,6 +15,8 @@ public class TiJoyMeter implements IDeviceEventListener {
 
 	private static final int JOYMETER_TAG_CURRENT_DATA = 0x001D0000; //
 
+	private static final int JOYMETER_TAG_WRITE_DATA = 0X04000110;
+
 	/**
 	 * 计量时间（格林尼治）（hex）
 	 */
@@ -54,15 +56,25 @@ public class TiJoyMeter implements IDeviceEventListener {
 	 * 开合闸状态 0合闸 1断闸
 	 */
 	int switchStatus;
-	
-	
+
 	IJoyMeterEventListener evtListener;
 
 	public TiJoyMeter(TiUART uart) {
 		dlt645 = new TiDLT645(uart);
-		// dlt645.start();
 	}
 
+	/**
+	 * Set event listener for data arriving
+	 * 
+	 * @param evtListener
+	 */
+	public void setEventListner(IJoyMeterEventListener evtListener) {
+		this.evtListener = evtListener;
+	}
+
+	/**
+	 * Start UART data monitor
+	 */
 	public void start() {
 		dlt645.setEventListener(this);
 		dlt645.start();
@@ -78,6 +90,7 @@ public class TiJoyMeter implements IDeviceEventListener {
 	}
 
 	/**
+	 * Read joymeter's measuring data
 	 * 
 	 * @throws IOException
 	 */
@@ -97,26 +110,60 @@ public class TiJoyMeter implements IDeviceEventListener {
 		this.switchStatus = meterData[26];
 	}
 
+	/**
+	 * 远程合闸
+	 * 
+	 * @param password
+	 * @param operator
+	 * @throws IOException
+	 */
+	public void switchOn(byte[] password, byte[] operator) throws IOException {
+
+		byte[] data = new byte[1];
+		data[0] = 0;
+		dlt645.writeMeterDataRequest(password, operator, JOYMETER_TAG_WRITE_DATA, data);
+	}
+
+	/**
+	 * 远程拉闸
+	 * 
+	 * @param password
+	 * @param operator
+	 * @throws IOException
+	 */
+	public void switchOff(byte[] password, byte[] operator) throws IOException {
+
+		byte[] data = new byte[1];
+		data[0] = 1;
+		dlt645.writeMeterDataRequest(password, operator, JOYMETER_TAG_WRITE_DATA, data);
+	}
+
+	/**
+	 * Send meter request to UART for joy-meter
+	 * 
+	 * @throws IOException
+	 */
 	public void readMeterRequet() throws IOException {
 		dlt645.sendMeterReadingRequest(JOYMETER_TAG_CURRENT_DATA);
 	}
 
 	@Override
-	public void onDataArrived(int funCode, byte[] tag, byte[] data) {
+	public void onDataArrived(int funCode, int dataTag, byte[] data) {
 
 		System.out.println(
-				"funCode " + funCode + " tag " + Formatter.toHexString(tag) + " data " + Formatter.toHexString(data));
+				"funCode " + funCode + " tag " + Integer.toHexString(dataTag) + " data " + Formatter.toHexString(data));
 
-		
 		try {
-			if(tag[3] == 0x00 && tag[2] == 0x1d) {
-				parseMeterData(tag, data);				
+			if (dataTag == JOYMETER_TAG_CURRENT_DATA) {
+				parseMeterData(dataTag, data);
+			} else if ((dataTag >> 24) == 0x08) {
+				dlt645.writeAlarmDataResponse(dataTag);
+				parseAlarmData(dataTag, data);
 			}
-			else if(tag[3] == 0x08) {
-				parseAlarmData(tag, data);
+			else if(dataTag == JOYMETER_TAG_WRITE_DATA) {
+				
 			}
-			
-			
+
 		} catch (Exception ex) {
 			ex.printStackTrace();
 		}
@@ -129,7 +176,14 @@ public class TiJoyMeter implements IDeviceEventListener {
 				+ this.powerfactor + " switch " + this.switchStatus;
 	}
 
-	private void parseMeterData(byte []tag, byte[] meterData) throws IOException {
+	/**
+	 * Parse meter data from response
+	 * 
+	 * @param tag
+	 * @param meterData
+	 * @throws IOException
+	 */
+	private void parseMeterData(int dataTag, byte[] meterData) throws IOException {
 
 		if (meterData.length < 27)
 			throw new IOException("Invalid data length");
@@ -143,37 +197,44 @@ public class TiJoyMeter implements IDeviceEventListener {
 		this.powerfactor = dlt645.BCD2Double(meterData, 24, 2, 3);
 
 		this.switchStatus = meterData[26];
-		
+
 		evtListener.onMeterDataArrived(this);
 	}
-	
-	private void parseAlarmData(byte [] tag,  byte [] alarmData) throws IOException {
+
+	/**
+	 * Parse alarm data from response
+	 * 
+	 * @param tag
+	 * @param alarmData
+	 * @throws IOException
+	 */
+	private void parseAlarmData(int dataTag, byte[] alarmData) throws IOException {
+		byte[] tag = LittleBitConverter.GetBytes(dataTag);
 		long alarmTime = LittleBitConverter.ToUInt32(alarmData, 0);
-		
-		switch(tag[3])
-		{
+
+		switch (tag[3]) {
 		case 0x66:
-			double overcurrent = dlt645.BCD2Double(alarmData,4, 4, 3);
+			double overcurrent = dlt645.BCD2Double(alarmData, 4, 4, 3);
 			this.evtListener.onAlarmOverCurrent(alarmTime, overcurrent);
 			break;
 		case 0x67:
-			double overpower = dlt645.BCD2Double(alarmData,4, 4, 2);
+			double overpower = dlt645.BCD2Double(alarmData, 4, 4, 2);
 			this.evtListener.onAlarmOverPower(alarmTime, overpower);
 			break;
-		case 0x68:			
-			double overvoltage = dlt645.BCD2Double(alarmData,4, 4, 2);
+		case 0x68:
+			double overvoltage = dlt645.BCD2Double(alarmData, 4, 4, 2);
 			this.evtListener.onAlarmOverVoltage(alarmTime, overvoltage);
 			break;
 		case 0x69:
-			double undervoltage = dlt645.BCD2Double(alarmData,4, 4, 2);
+			double undervoltage = dlt645.BCD2Double(alarmData, 4, 4, 2);
 			this.evtListener.onAlarmUnderVoltage(alarmTime, undervoltage);
 			break;
 		case 0x6A:
-			double remaining = dlt645.BCD2Double(alarmData,4,4,2);
+			double remaining = dlt645.BCD2Double(alarmData, 4, 4, 2);
 			this.evtListener.onAlarmLowPower(alarmTime, remaining);
 			break;
 		case 0x6B:
-			double remaining2 = dlt645.BCD2Double(alarmData,4,4,2);
+			double remaining2 = dlt645.BCD2Double(alarmData, 4, 4, 2);
 			this.evtListener.onAlarmOverDraft(alarmTime, remaining2);
 			break;
 		case 0x6C:
@@ -189,8 +250,7 @@ public class TiJoyMeter implements IDeviceEventListener {
 			this.evtListener.onTempPowerSupplyCountUpdate(tmpCount);
 			break;
 		}
-		
-		
+
 	}
 
 	public static void main(String[] args) {

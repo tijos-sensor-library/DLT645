@@ -15,7 +15,7 @@ public interface IDeviceEventListener {
      * @param srcAddr  remote address
      * @param buff     data buffer arrived
      */
-    void onDataArrived(int funCode, byte [] tag, byte [] data);
+    void onDataArrived(int funCode, int dataTag, byte [] data);
 
 
 }

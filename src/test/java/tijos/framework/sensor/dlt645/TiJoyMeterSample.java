@@ -12,6 +12,9 @@ public class TiJoyMeterSample implements IJoyMeterEventListener {
 
 	TiJoyMeter jmeter = null;
 
+	byte[] operator = new byte[] { 0x00, 0x00, 0x00, 0x01 };
+	byte[] password = new byte[] { 0x00, 0x00, 0x00, 0x02 };
+
 	public TiJoyMeterSample(TiUART uart) throws IOException {
 		jmeter = new TiJoyMeter(uart);
 	}
@@ -26,6 +29,14 @@ public class TiJoyMeterSample implements IJoyMeterEventListener {
 
 	public void loop() throws IOException {
 		jmeter.readMeterRequet();
+	}
+
+	public void switchOn() throws IOException {
+		jmeter.switchOn(password, operator);
+	}
+
+	public void switchOff() throws IOException {
+		jmeter.switchOff(password, operator);
 	}
 
 	@Override
@@ -99,9 +110,18 @@ public class TiJoyMeterSample implements IJoyMeterEventListener {
 
 			sample.init();
 
+			int count = 0;
 			while (true) {
 				sample.loop();
 				Delay.msDelay(5000);
+
+				if (count++ == 5) {
+					sample.switchOn();
+				}
+
+				if (count == 10) {
+					sample.switchOff();
+				}
 			}
 		} catch (Exception ex) {
 			ex.printStackTrace();
