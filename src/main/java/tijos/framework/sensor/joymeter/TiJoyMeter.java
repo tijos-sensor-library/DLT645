@@ -9,60 +9,53 @@ import tijos.framework.util.Delay;
 import tijos.framework.util.Formatter;
 import tijos.framework.util.LittleBitConverter;
 
-
 public class TiJoyMeter implements IDeviceEventListener {
 
 	private TiDLT645 dlt645;
 
-	/**
-	 * 抄读当前数据
-	 */
 	private static final int JOYMETER_TAG_CURRENT_DATA = 0x001D0000; //
 
-	/**
-	 * 远程合闸
-	 */
 	private static final int JOYMETER_TAG_SWITCH = 0X0400050A;
 
 	/**
 	 * 计量时间（格林尼治）（hex）
 	 */
-	long measureTime = 0;
+	public long measureTime = 0;
 
 	/**
 	 * 剩余电量（kWh）
 	 */
-	double remaining;
+	public double remaining;
 
 	/**
 	 * 历史电量(kWh)
 	 */
-	double hisotry;
+	public double hisotry;
 
 	/**
 	 * 当前电流(A)
 	 */
-	double current;
+	public double current;
 
 	/**
 	 * 当前电压(V)
 	 */
-	double voltage;
+	public double voltage;
 
 	/**
 	 * 当前功率(W)
 	 */
-	double power;
+	public double power;
 
 	/**
 	 * 功率因数
 	 */
-	double powerfactor;
+	public double powerfactor;
 
 	/**
 	 * 开合闸状态 0合闸 1断闸
 	 */
-	int switchStatus;
+	public int switchStatus;
 
 	IJoyMeterEventListener evtListener;
 
@@ -166,11 +159,13 @@ public class TiJoyMeter implements IDeviceEventListener {
 			} else if ((dataTag >> 24) == 0x08) {
 				dlt645.writeAlarmDataResponse(dataTag);
 				parseAlarmData(dataTag, data);
-			} else if (dataTag == 0) {
-				if (funCode == 0x94) {
-					System.out.println(" ok " + data[0]);
-				} else if (funCode == 0xD4) {
-					System.out.println("error " + data[0]);
+			}
+			else if(dataTag == 0) {
+				if(funCode == 0x94) {
+					System.out.println(" ok " + data[0]);					
+				}
+				else if(funCode == 0xD4) {
+				System.out.println("error " + data[0]);
 				}
 			}
 

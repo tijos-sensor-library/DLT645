@@ -163,7 +163,7 @@ public class TiDLT645 extends Thread {
 
 						checksum.update(buffer, 0, buffer.length - 2);
 
-						if (checksum.getValue() != (buffer[leftLen - 2] & 0xFF)) {
+						if (checksum.getValue() != (byte) (buffer[leftLen - 2] & 0xFF)) {
 							// throw new IOException("Invalid CheckSum");
 						}
 
