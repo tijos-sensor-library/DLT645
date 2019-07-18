@@ -162,10 +162,12 @@ public class TiDLT645 extends Thread {
 						input.read(buffer);
 
 						checksum.update(buffer, 0, buffer.length - 2);
-
-						if (checksum.getValue() != (byte) (buffer[leftLen - 2] & 0xFF)) {
-							// throw new IOException("Invalid CheckSum");
-						}
+						
+						int cs = checksum.getValue();
+			            int cs2 = (int)(buffer[leftLen -2] & 0xFF);			            
+			            if(cs != cs2) {
+			              throw new IOException("Invalid CheckSum");
+			            }
 
 						if (dataLen > 0) {
 							for (int i = 0; i < dataLen; ++i) {
@@ -320,24 +322,25 @@ public class TiDLT645 extends Thread {
 		return BCD2Double(input, 0, input.length, decimal);
 	}
 
-	public double BCD2Double(byte[] input, int start, int len, int decimal) {
+	public static double BCD2Double(byte[] input, int start, int len, int decimal) {
 		double reading = 0;
 		double coef = 1;
 
 		if (start + len > input.length)
 			return Double.NaN;
 
+
 		/* result is in BCD format XXXXXX.XX, little endian */
 		for (int i = 0; i < len; ++i) {
 			reading += (input[start + i] & 0x0f) * coef;
-			reading += (input[start + i] >> 4) * 10 * coef;
+			reading += ((input[start + i] >>> 4) & 0x0F) * 10 * coef;
 			coef *= 100;
 		}
 
 		for (int i = 0; i < decimal; i++) {
 			reading /= 10.0;
 		}
-
+		
 		return reading;
 	}
 
@@ -674,15 +677,13 @@ public class TiDLT645 extends Thread {
 
 	// FEFEFEFE6866666666666668911F33335033650F9F6B33333333333333338733333343553533933933337538331516
 	public static void main(String[] args) throws IOException {
+			
+		byte [] input = new byte[]{(byte)0x80,0x20,0x02,0x00};
+		
 
-		TiDLT645 dlt = new TiDLT645(null);
-		byte[] password = new byte[] { 0x00, 0x00, 0x00, 0x00 };
-		byte[] operator = new byte[] { (byte) 0xC1, (byte) 0XC2, (byte) 0XC3, (byte) 0XC4 };
-		int dataTag = 0x0400010A;
-
-		byte[] data = new byte[] { 01 };
-
-		byte[] pkt = dlt.createWriteRequest(DLT645_PKT_TYPE_WRITE_DATA, password, operator, dataTag, data);
-
+		double reading = TiDLT645.BCD2Double(input, 0, 4, 2);
+	
+		System.out.println(reading);
+	
 	}
 }

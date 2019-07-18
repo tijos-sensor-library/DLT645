@@ -1,8 +1,18 @@
 package tijos.framework.sensor.joymeter;
 
+/**
+ * Event listener for Meter
+ * @author lemon
+ *
+ */
 public interface IJoyMeterEventListener {
 
+	/**
+	 * Data arrived and could be access from TiJoyMeter
+	 * @param meter
+	 */
 	void onMeterDataArrived(TiJoyMeter meter);
+	
 	
 	void onAlarmOverCurrent(long alarmTime, double current);
 	
